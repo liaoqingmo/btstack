@@ -6,8 +6,72 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- SM: generate and store ER / IR keys in TLV, unless manually set by application
+
+### Fixed
+- SM: fix internal buffer overrun during random address generation
+
+## Changes November 2018
+
+### Added
+- GAP: gap_le_connection_interval provides connection interval for conn handle
+- Nordic SPP Service Server: GATT service that emulates a serial port over BLE based on Nordic Semiconductor documentation.
+- uBlox  SPP Service Server: GATT service that emulates a serial port over BLE based on uBlox documentation.
+- SM: ENABLE_LE_CENTRAL_AUTO_ENCRYPTION triggers automatic encryption on connect to bonded devices
+- SM: generate and store ER / IR keys in TLV, unless manually set by application
+
+### Fixed
+- SM: prevent random address updates if gap_random_address_set was used
+- SM: fix internal buffer overrun that can cause storing of bonding information to fail
+- SM: ignore Slave Security Request after sending own Pairing Request
+- L2CAP: fix use after free on disconnect if ERTM is enabled
+- HFP: Handle multiple commands/responses in single RFCOMM packet
+- Memory Pools: clear all buffers before use
+
+## Changes October 2018
+
+### Added
+- SDP Server: queue incoming connections when already connected instead of rejecting them
+- GAP: Support enter/exit sniff mode via gap_sniff_mode_enter/exit. gap_set_default_link_policy_settings is needed to enable sniff mode in general.
+- HIDS Device: GATT service that exposes HID reports intended for HID Devices, like keyboard and mouse.
+
+### Fixed
+- HCI: fix bug in gap_inquiry_stop that triggered additional GAP_EVENT_INQUIRY_COMPLETE instead of stopping the inquiry
+- L2CAP: fix issue with outgoing connection before read remote supported complete when other channels exist
+- L2CAP ERTM: allow SDU of szie MPS in first packet that contains L2CAP SDU Length
+- L2CAP ERTM: fix memory corruption triggered if local_mtu > mps
+- L2CAP ERTM: fix outgoing fragment management
+- HFP: decline incoming RFCOMM connection after outgoing connection was started
+- AVRCP: fix crash on disconnect of connection established by remote
+
+## Changes September 2018
+
+### Fixed
+- HCI: Error creating outgoing connection (e.g. Connection Limit Exceeded) now handled
+- L2CAP: Error creating outgoing connection (e.g. Connection Limit Exceeded) now handled
+- L2CAP: Evaluate 'can send now' on HCI Disconnect as ACL buffers in Bluetooth Controller have been used for the closed connection are freed implicitly
+- L2CAP: Check can send now before sending extended information requeste needed for ERTM mode
+- L2CAP: Use valid signaling identifier for L2CAP Connection Parameter Update Request
+- RFCOMM: Trigger l2cap request to send on rfcomm credits when client is waiting to sendtrigger l2cap request to send on rfcomm credits when client is waiting to send
+- RFCOMM: Avoid use-after-free on channel finalize
+- GATT Client: stop timer on disconnect - fixes use after free / crash
+
+### Added
+- A2DP Source: Support stream reconfiguration (a2dp_source_reconfigure_stream_sampling_frequency)
+- 3rd-party: yxml is used for PBAP vCard list parsing
+- cc256xC: new v1.1 init scripts
+
+## Changes August 2018
+
+### Added
+- PBAP: added pbap_get_phonebook_size() to get phonebook entry count
+
 ### Fixed
 - GATT Server: Allow enable Notifications/Indication with Write Command. Fixes issue with some Android devices.
+- SM: fix pairing for Secure Connections with Bonding if remote sends additional keys
+- SM: drop LTK flag from Pairing Response for Secure Connections
+- L2CAP: fix emitted L2CAP_EVENT_CONNECTION_PARAMETER_UPDATE_REQUEST
 
 ## Changes June 2018
 

@@ -110,7 +110,7 @@ Src/stm32l0xx_it.c \
 	le_device_db_memory.c \
 	sm.c \
 	uECC.c \
-	0000000_META_hci_patches_v5_iram.c \
+	0000000_META_hci_patches_v7.c \
 SEGGER_RTT.c \
 SEGGER_RTT_Syscalls_GCC.c \
 
@@ -219,6 +219,7 @@ LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BU
 
 LE_EXAMPLES = \
 	gap_le_advertisements \
+	gatt_heart_rate_client \
 	le_counter \
 	le_streamer \
 	le_streamer_client \

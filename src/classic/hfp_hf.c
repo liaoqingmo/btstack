@@ -551,9 +551,18 @@ static int hfp_hf_run_for_audio_connection(hfp_connection_t * hfp_connection){
     // run codecs exchange
     int done = codecs_exchange_state_machine(hfp_connection);
     if (done) return 1;
-        
+    
+    if (hfp_connection->codecs_state != HFP_CODECS_EXCHANGED) return 0;
+    if (hfp_connection->establish_audio_connection){
+        hfp_connection->state = HFP_W4_SCO_CONNECTED;
+        hfp_connection->establish_audio_connection = 0;
+        hfp_setup_synchronous_connection(hfp_connection);
+        return 1;
+    }
+
     return 0;
 }
+
 
 static int call_setup_state_machine(hfp_connection_t * hfp_connection){
     if (hfp_connection->hf_answer_incoming_call){
@@ -974,6 +983,10 @@ static void hfp_hf_switch_on_ok(hfp_connection_t *hfp_connection){
     hfp_connection->command = HFP_CMD_NONE;
 }
 
+static int hfp_parser_is_end_of_line(uint8_t byte){
+    return byte == '\n' || byte == '\r';
+}
+
 static void hfp_hf_handle_rfcomm_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
     UNUSED(packet_type);    // ok: only called with RFCOMM_DATA_PACKET
 
@@ -989,92 +1002,90 @@ static void hfp_hf_handle_rfcomm_event(uint8_t packet_type, uint16_t channel, ui
     int pos;
     for (pos = 0; pos < size ; pos++){
         hfp_parse(hfp_connection, packet[pos], 1);
-    } 
 
-    int value;
-    int i;
-    switch (hfp_connection->command){
-        case HFP_CMD_GET_SUBSCRIBER_NUMBER_INFORMATION:
-            hfp_connection->command = HFP_CMD_NONE;
-            // printf("Subscriber Number: number %s, type %u\n", hfp_connection->bnip_number, hfp_connection->bnip_type);
-            hfp_hf_emit_subscriber_information(hfp_hf_callback, HFP_SUBEVENT_SUBSCRIBER_NUMBER_INFORMATION, 0, hfp_connection->bnip_type, hfp_connection->bnip_number);
-            break;
-        case HFP_CMD_RESPONSE_AND_HOLD_STATUS:
-            hfp_connection->command = HFP_CMD_NONE;
-            // printf("Response and Hold status: %s\n", hfp_connection->line_buffer);
-            hfp_emit_event(hfp_connection, HFP_SUBEVENT_RESPONSE_AND_HOLD_STATUS, btstack_atoi((char *)&hfp_connection->line_buffer[0]));
-            break;
-        case HFP_CMD_LIST_CURRENT_CALLS:
-            hfp_connection->command = HFP_CMD_NONE;
-            // printf("Enhanced Call Status: idx %u, dir %u, status %u, mpty %u, number %s, type %u\n",
-            //      hfp_connection->clcc_idx, hfp_connection->clcc_dir, hfp_connection->clcc_status, hfp_connection->clcc_mpty,
-            //      hfp_connection->bnip_number, hfp_connection->bnip_type);
-            hfp_hf_emit_enhanced_call_status(hfp_hf_callback, hfp_connection->clcc_idx, 
-                hfp_connection->clcc_dir, hfp_connection->clcc_status, hfp_connection->clcc_mpty, 
-                hfp_connection->bnip_type, hfp_connection->bnip_number);
-            break;
-        case HFP_CMD_SET_SPEAKER_GAIN:
-            hfp_connection->command = HFP_CMD_NONE;
-            value = btstack_atoi((char*)hfp_connection->line_buffer);
-            hfp_hf_speaker_gain = value;
-            hfp_emit_event(hfp_connection, HFP_SUBEVENT_SPEAKER_VOLUME, value);
-            break;
-        case HFP_CMD_SET_MICROPHONE_GAIN:
-            hfp_connection->command = HFP_CMD_NONE;
-            value = btstack_atoi((char*)hfp_connection->line_buffer);
-            hfp_hf_microphone_gain = value;
-            hfp_emit_event(hfp_connection, HFP_SUBEVENT_MICROPHONE_VOLUME, value);
-            break;
-        case HFP_CMD_AG_SENT_PHONE_NUMBER:
-            hfp_connection->command = HFP_CMD_NONE;
-            hfp_emit_string_event(hfp_connection, HFP_SUBEVENT_NUMBER_FOR_VOICE_TAG, hfp_connection->bnip_number);
-            break;
-        case HFP_CMD_AG_SENT_CALL_WAITING_NOTIFICATION_UPDATE:
-            hfp_connection->command = HFP_CMD_NONE;
-            hfp_hf_emit_type_and_number(hfp_hf_callback, HFP_SUBEVENT_CALL_WAITING_NOTIFICATION, hfp_connection->bnip_type, hfp_connection->bnip_number);
-            break;
-        case HFP_CMD_AG_SENT_CLIP_INFORMATION:
-            hfp_connection->command = HFP_CMD_NONE;
-            hfp_hf_emit_type_and_number(hfp_hf_callback, HFP_SUBEVENT_CALLING_LINE_IDENTIFICATION_NOTIFICATION, hfp_connection->bnip_type, hfp_connection->bnip_number);
-            break;
-        case HFP_CMD_EXTENDED_AUDIO_GATEWAY_ERROR:
-            hfp_connection->ok_pending = 0;
-            hfp_connection->command = HFP_CMD_NONE;
-            hfp_connection->extended_audio_gateway_error = 0;
-            hfp_emit_event(hfp_connection, HFP_SUBEVENT_EXTENDED_AUDIO_GATEWAY_ERROR, hfp_connection->extended_audio_gateway_error_value); 
-            break;  
-        case HFP_CMD_ERROR:
-            hfp_connection->ok_pending = 0;
-            hfp_reset_context_flags(hfp_connection);
-            hfp_connection->command = HFP_CMD_NONE;
-            hfp_emit_event(hfp_connection, HFP_SUBEVENT_COMPLETE, 1); 
-            break;
-        case HFP_CMD_OK:
-            hfp_hf_switch_on_ok(hfp_connection);
-            break;
-        case HFP_CMD_RING:
-            hfp_emit_simple_event(hfp_connection, HFP_SUBEVENT_RING);
-            break;
-        case HFP_CMD_TRANSFER_AG_INDICATOR_STATUS:
-            for (i = 0; i < hfp_connection->ag_indicators_nr; i++){
-                if (hfp_connection->ag_indicators[i].status_changed) {
-                    if (strcmp(hfp_connection->ag_indicators[i].name, "callsetup") == 0){
-                        hfp_callsetup_status = (hfp_callsetup_status_t) hfp_connection->ag_indicators[i].status;
-                    } else if (strcmp(hfp_connection->ag_indicators[i].name, "callheld") == 0){
-                        hfp_callheld_status = (hfp_callheld_status_t) hfp_connection->ag_indicators[i].status;
-                        // avoid set but not used warning
-                        (void) hfp_callheld_status;
-                    } else if (strcmp(hfp_connection->ag_indicators[i].name, "call") == 0){
-                        hfp_call_status = (hfp_call_status_t) hfp_connection->ag_indicators[i].status;
+        // parse until end of line
+        if (!hfp_parser_is_end_of_line(packet[pos])) continue;
+
+        int value;
+        int i;
+        switch (hfp_connection->command){
+            case HFP_CMD_GET_SUBSCRIBER_NUMBER_INFORMATION:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_hf_emit_subscriber_information(hfp_hf_callback, HFP_SUBEVENT_SUBSCRIBER_NUMBER_INFORMATION, 0, hfp_connection->bnip_type, hfp_connection->bnip_number);
+                break;
+            case HFP_CMD_RESPONSE_AND_HOLD_STATUS:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_emit_event(hfp_connection, HFP_SUBEVENT_RESPONSE_AND_HOLD_STATUS, btstack_atoi((char *)&hfp_connection->line_buffer[0]));
+                break;
+            case HFP_CMD_LIST_CURRENT_CALLS:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_hf_emit_enhanced_call_status(hfp_hf_callback, hfp_connection->clcc_idx,
+                    hfp_connection->clcc_dir, hfp_connection->clcc_status, hfp_connection->clcc_mpty,
+                    hfp_connection->bnip_type, hfp_connection->bnip_number);
+                break;
+            case HFP_CMD_SET_SPEAKER_GAIN:
+                hfp_connection->command = HFP_CMD_NONE;
+                value = btstack_atoi((char*)hfp_connection->line_buffer);
+                hfp_hf_speaker_gain = value;
+                hfp_emit_event(hfp_connection, HFP_SUBEVENT_SPEAKER_VOLUME, value);
+                break;
+            case HFP_CMD_SET_MICROPHONE_GAIN:
+                hfp_connection->command = HFP_CMD_NONE;
+                value = btstack_atoi((char*)hfp_connection->line_buffer);
+                hfp_hf_microphone_gain = value;
+                hfp_emit_event(hfp_connection, HFP_SUBEVENT_MICROPHONE_VOLUME, value);
+                break;
+            case HFP_CMD_AG_SENT_PHONE_NUMBER:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_emit_string_event(hfp_connection, HFP_SUBEVENT_NUMBER_FOR_VOICE_TAG, hfp_connection->bnip_number);
+                break;
+            case HFP_CMD_AG_SENT_CALL_WAITING_NOTIFICATION_UPDATE:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_hf_emit_type_and_number(hfp_hf_callback, HFP_SUBEVENT_CALL_WAITING_NOTIFICATION, hfp_connection->bnip_type, hfp_connection->bnip_number);
+                break;
+            case HFP_CMD_AG_SENT_CLIP_INFORMATION:
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_hf_emit_type_and_number(hfp_hf_callback, HFP_SUBEVENT_CALLING_LINE_IDENTIFICATION_NOTIFICATION, hfp_connection->bnip_type, hfp_connection->bnip_number);
+                break;
+            case HFP_CMD_EXTENDED_AUDIO_GATEWAY_ERROR:
+                hfp_connection->ok_pending = 0;
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_connection->extended_audio_gateway_error = 0;
+                hfp_emit_event(hfp_connection, HFP_SUBEVENT_EXTENDED_AUDIO_GATEWAY_ERROR, hfp_connection->extended_audio_gateway_error_value);
+                break;
+            case HFP_CMD_ERROR:
+                hfp_connection->ok_pending = 0;
+                hfp_reset_context_flags(hfp_connection);
+                hfp_connection->command = HFP_CMD_NONE;
+                hfp_emit_event(hfp_connection, HFP_SUBEVENT_COMPLETE, 1);
+                break;
+            case HFP_CMD_OK:
+                hfp_hf_switch_on_ok(hfp_connection);
+                break;
+            case HFP_CMD_RING:
+                hfp_emit_simple_event(hfp_connection, HFP_SUBEVENT_RING);
+                break;
+            case HFP_CMD_TRANSFER_AG_INDICATOR_STATUS:
+                for (i = 0; i < hfp_connection->ag_indicators_nr; i++){
+                    if (hfp_connection->ag_indicators[i].status_changed) {
+                        if (strcmp(hfp_connection->ag_indicators[i].name, "callsetup") == 0){
+                            hfp_callsetup_status = (hfp_callsetup_status_t) hfp_connection->ag_indicators[i].status;
+                        } else if (strcmp(hfp_connection->ag_indicators[i].name, "callheld") == 0){
+                            hfp_callheld_status = (hfp_callheld_status_t) hfp_connection->ag_indicators[i].status;
+                            // avoid set but not used warning
+                            (void) hfp_callheld_status;
+                        } else if (strcmp(hfp_connection->ag_indicators[i].name, "call") == 0){
+                            hfp_call_status = (hfp_call_status_t) hfp_connection->ag_indicators[i].status;
+                        }
+                        hfp_connection->ag_indicators[i].status_changed = 0;
+                        hfp_emit_ag_indicator_event(hfp_hf_callback, hfp_connection->ag_indicators[i]);
+                        break;
                     }
-                    hfp_connection->ag_indicators[i].status_changed = 0;
-                    hfp_emit_ag_indicator_event(hfp_hf_callback, hfp_connection->ag_indicators[i]);
-                    break;
                 }
-            }
-            break;
-        default:
-            break;
+                break;
+            default:
+                break;
+        }
     }
     hfp_run_for_context(hfp_connection);
 }
@@ -1108,10 +1119,19 @@ static void rfcomm_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t
     hfp_run();
 }
 
+static void hci_event_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
+    hfp_handle_hci_event(packet_type, channel, packet, size, HFP_ROLE_HF);
+    
+    // allow for sco established -> ring transition and sco retry
+    if (packet_type != HCI_EVENT_PACKET) return;
+    if (hci_event_packet_get_type(packet) != HCI_EVENT_SYNCHRONOUS_CONNECTION_COMPLETE) return;
+    hfp_run();
+}
+
 void hfp_hf_init(uint16_t rfcomm_channel_nr){
     hfp_init();
 
-    hci_event_callback_registration.callback = &hfp_handle_hci_event;
+    hci_event_callback_registration.callback = &hci_event_packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
 
     rfcomm_register_service(rfcomm_packet_handler, rfcomm_channel_nr, 0xffff);  
@@ -1235,6 +1255,9 @@ void hfp_hf_disable_report_extended_audio_gateway_error_result_code(hci_con_hand
     hfp_hf_set_report_extended_audio_gateway_error_result_code(acl_handle, 0);
 }
 
+static uint8_t hfp_hf_esco_s4_supported(hfp_connection_t * hfp_connection){
+    return (hfp_connection->remote_supported_features & (1<<HFP_AGSF_ESCO_S4)) &&  (hfp_supported_features  & (1<<HFP_HFSF_ESCO_S4));
+}
 
 void hfp_hf_establish_audio_connection(hci_con_handle_t acl_handle){
     hfp_connection_t * hfp_connection = get_hfp_hf_connection_context_for_acl_handle(acl_handle);
@@ -1247,15 +1270,23 @@ void hfp_hf_establish_audio_connection(hci_con_handle_t acl_handle){
     if (hfp_connection->state == HFP_AUDIO_CONNECTION_ESTABLISHED) return;
     if (hfp_connection->state >= HFP_W2_DISCONNECT_SCO) return;
 
+    hfp_connection->trigger_codec_exchange = 0;
+    hfp_connection->establish_audio_connection = 1;
     if (!has_codec_negotiation_feature(hfp_connection)){
         log_info("hfp_ag_establish_audio_connection - no codec negotiation feature, using defaults");
         hfp_connection->codecs_state = HFP_CODECS_EXCHANGED;
-        hfp_connection->establish_audio_connection = 1;
+        hfp_connection->suggested_codec = HFP_CODEC_CVSD;
+        hfp_connection->codec_confirmed = hfp_connection->suggested_codec;
+        hfp_connection->negotiated_codec = hfp_connection->suggested_codec;
+        hfp_init_link_settings(hfp_connection, hfp_hf_esco_s4_supported(hfp_connection));
+        hfp_connection->trigger_codec_exchange = 0;
+        hfp_connection->state = HFP_W4_SCO_CONNECTED;
     } else {
         switch (hfp_connection->codecs_state){
             case HFP_CODECS_W4_AG_COMMON_CODEC:
                 break;
             default:
+                hfp_connection->trigger_codec_exchange = 1;
                 hfp_connection->command = HFP_CMD_TRIGGER_CODEC_CONNECTION_SETUP;
                 break;
         } 
